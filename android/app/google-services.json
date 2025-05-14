@@ -1,0 +1,86 @@
+{
+  "project_info": {
+    "project_number": "299375358520",
+    "project_id": "staff-nfc-attendance",
+    "storage_bucket": "staff-nfc-attendance.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:299375358520:android:149bb12535a60afea4eccd",
+        "android_client_info": {
+          "package_name": "com.example.newteacherattendace"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDt58eq-uMlweRFUYbhredoICraj-V5Ucs"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:299375358520:android:d561ab1aa21a2b90a4eccd",
+        "android_client_info": {
+          "package_name": "com.example.nfcattendance"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDt58eq-uMlweRFUYbhredoICraj-V5Ucs"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:299375358520:android:17e5ad0bc4abfd6ea4eccd",
+        "android_client_info": {
+          "package_name": "com.example.schoollinkadminapp"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDt58eq-uMlweRFUYbhredoICraj-V5Ucs"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:299375358520:android:6191f93b4eab8596a4eccd",
+        "android_client_info": {
+          "package_name": "com.example.staff_time"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDt58eq-uMlweRFUYbhredoICraj-V5Ucs"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

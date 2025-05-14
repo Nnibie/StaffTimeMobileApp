@@ -53,8 +53,19 @@ class AttendanceTile extends StatelessWidget {
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            // Avatar with photo or initials
-            _buildAvatar(),
+            // Avatar with photo
+            photoUrl != null && photoUrl!.isNotEmpty
+                ? ClipRRect(
+                    borderRadius: BorderRadius.circular(25),
+                    child: Image.network(
+                      photoUrl!,
+                      width: 50,
+                      height: 50,
+                      fit: BoxFit.cover,
+                    ),
+                  )
+                : Container(width: 50), // Empty space if no photo (no fallback)
+            
             const SizedBox(width: 12),
             
             // Employee info and time details
@@ -127,7 +138,7 @@ class AttendanceTile extends StatelessWidget {
                         ),
                       ),
                     )
-                  else
+                  else if (totalHours.isNotEmpty)
                     Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       crossAxisAlignment: CrossAxisAlignment.center,
@@ -154,47 +165,6 @@ class AttendanceTile extends StatelessWidget {
               ),
             ),
           ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildAvatar() {
-    if (photoUrl != null) {
-      return ClipRRect(
-        borderRadius: BorderRadius.circular(25),
-        child: Image.network(
-          photoUrl!,
-          width: 50,
-          height: 50,
-          fit: BoxFit.cover,
-          errorBuilder: (context, error, stackTrace) {
-            // Fallback if image fails to load
-            return _buildInitialsAvatar();
-          },
-        ),
-      );
-    } else {
-      return _buildInitialsAvatar();
-    }
-  }
-
-  Widget _buildInitialsAvatar() {
-    return Container(
-      width: 50,
-      height: 50,
-      decoration: const BoxDecoration(
-        color: Color(0xFFF0F0F0),
-        shape: BoxShape.circle,
-      ),
-      child: Center(
-        child: Text(
-          initials,
-          style: GoogleFonts.poppins(
-            fontSize: 16,
-            fontWeight: FontWeight.w600,
-            color: const Color(0xFF666666),
-          ),
         ),
       ),
     );
