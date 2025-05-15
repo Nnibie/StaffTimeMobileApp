@@ -1,3 +1,4 @@
+
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:staff_time/Widgets/AttendanceTile.dart';
@@ -127,6 +128,9 @@ class _DashboardState extends State<Dashboard> {
                 final departureTime = data['departure_time'] ?? '';
                 final isActive = departureTime == ''; // Staff is active if there's no departure time
                 
+                // Add auto_completed field check
+                final isAutoCompleted = data['auto_completed'] ?? false;
+                
                 return {
                   'id': doc.id,
                   'staffId': staffId,
@@ -137,6 +141,7 @@ class _DashboardState extends State<Dashboard> {
                   'isLate': isLate,
                   'isActive': isActive, // Employee is active if there's no departure time
                   'isEarlyDeparture': _timeSettings.isEarlyDeparture(departureTime),
+                  'isAutoCompleted': isAutoCompleted, // Add this property
                 };
               })
               .toList();
@@ -691,6 +696,7 @@ class _DashboardState extends State<Dashboard> {
         clockOutTime: departureTimeFormatted,
         isActive: record['isActive'],
         isClockOutEarly: !record['isActive'] && record['isEarlyDeparture'],
+        isAutoCompleted: record['isAutoCompleted'], // Add this property
         totalHours: totalHours,
       );
     }).toList();
@@ -717,6 +723,7 @@ class _DashboardState extends State<Dashboard> {
           isClockInLate: false,
           clockOutTime: '--:--',
           isClockOutEarly: false,
+          isAutoCompleted: false, // Not applicable for absent staff
           totalHours: '',
         );
       }).toList();

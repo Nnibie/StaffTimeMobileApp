@@ -13,6 +13,7 @@ class AttendanceTile extends StatelessWidget {
   final bool isClockOutEarly;
   final bool isClockOutLate;
   final bool isActive;
+  final bool isAutoCompleted; // Add this line
 
   const AttendanceTile({
     Key? key,
@@ -26,6 +27,7 @@ class AttendanceTile extends StatelessWidget {
     this.isClockOutEarly = false,
     this.isClockOutLate = false,
     this.isActive = false,
+    this.isAutoCompleted = false, // Add this line with default value
     required this.totalHours,
   }) : super(key: key);
 
@@ -104,6 +106,7 @@ class AttendanceTile extends StatelessWidget {
                               time: clockInTime,
                               isLate: isClockInLate,
                               isEarly: false,
+                              isAuto: false, // Clock-in is never auto-completed
                             ),
                             const SizedBox(width: 16),
                             _buildTimeRow(
@@ -111,6 +114,7 @@ class AttendanceTile extends StatelessWidget {
                               time: clockOutTime,
                               isLate: isClockOutLate,
                               isEarly: isClockOutEarly,
+                              isAuto: isAutoCompleted, // Pass the auto-completed flag here
                             ),
                           ],
                         ),
@@ -175,11 +179,14 @@ class AttendanceTile extends StatelessWidget {
     required String time,
     required bool isLate,
     required bool isEarly,
+    required bool isAuto, // Changed from default value to required
   }) {
     Color timeColor = const Color(0xFF2CA01C); // Default green for on-time
     
     if (time == '--:--') {
       timeColor = const Color(0xFF666666); // Gray for not clocked yet
+    } else if (isAuto) {
+      timeColor = const Color(0xFFFF9900); // Orange for auto-completed
     } else if (isLate) {
       timeColor = const Color(0xFFE74C3C); // Red for late
     } else if (isEarly) {
@@ -205,6 +212,16 @@ class AttendanceTile extends StatelessWidget {
             color: timeColor,
           ),
         ),
+        // Optional: Add a small indicator icon for auto-completed
+        if (isAuto) 
+          Padding(
+            padding: const EdgeInsets.only(left: 4),
+            child: Icon(
+              Icons.access_time,
+              size: 12,
+              color: const Color(0xFFFF9900),
+            ),
+          ),
       ],
     );
   }
