@@ -3,11 +3,11 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:staff_time/Widgets/AttendanceTile.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:staff_time/app_theme.dart';
+import 'package:staff_time/Theme/app_theme.dart';
 import 'package:staff_time/Screens/SettingsScreen.dart';
 import 'package:staff_time/Screens/RecordsScreen.dart';
 import 'package:staff_time/Screens/StaffScreen.dart';
-import 'package:staff_time/Widgets/utility/time_settings.dart'; // Import TimeSettings utility
+import 'package:staff_time/utility/time_settings.dart'; // Import TimeSettings utility
 import 'package:shimmer/shimmer.dart'; // Add shimmer package for skeleton loading
 import 'dart:async';
 
@@ -24,6 +24,8 @@ class _DashboardState extends State<Dashboard> {
   
   // Navigation index
   int _currentIndex = 0;
+
+  late PageController _pageController;
   
   // Store attendance data
   List<Map<String, dynamic>> attendanceRecords = [];
@@ -48,24 +50,36 @@ class _DashboardState extends State<Dashboard> {
   final TimeSettings _timeSettings = TimeSettings();
   
   @override
-  void initState() {
-    super.initState();
-    _initializeTimeSettings();
-  }
+void initState() {
+  super.initState();
+  // Initialize PageController with current index
+  _pageController = PageController(initialPage: _currentIndex);
+  _initializeTimeSettings();
+}
   
   // Initialize time settings before setting up listeners
   Future<void> _initializeTimeSettings() async {
     await _timeSettings.init();
     setupRealtimeListeners();
   }
+
+  void _onPageChanged(int index) {
+  setState(() {
+    _currentIndex = index;
+  });
+}
   
-  @override
-  void dispose() {
-    // Cancel subscriptions when widget is disposed
-    _attendanceSubscription?.cancel();
-    _staffSubscription?.cancel();
-    super.dispose();
-  }
+@override
+void dispose() {
+  // Cancel subscriptions when widget is disposed
+  _attendanceSubscription?.cancel();
+  _staffSubscription?.cancel();
+  
+  // Dispose the page controller
+  _pageController.dispose();
+  
+  super.dispose();
+}
   
   void setupRealtimeListeners() {
     setState(() {
@@ -219,12 +233,18 @@ class _DashboardState extends State<Dashboard> {
     }
   }
 
-  // Handler to navigate between screens
-  void _onNavItemTapped(int index) {
-    setState(() {
-      _currentIndex = index;
-    });
-  }
+  // Handler to navigate between screens with animation
+void _onNavItemTapped(int index) {
+  _pageController.animateToPage(
+    index,
+    duration: const Duration(milliseconds: 300),
+    curve: Curves.easeInOut,
+  );
+  
+  setState(() {
+    _currentIndex = index;
+  });
+}
 
   // Method to get the appropriate screen based on nav index
   Widget _getScreenForIndex(int index) {
@@ -242,70 +262,80 @@ class _DashboardState extends State<Dashboard> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+     return Scaffold(
+    backgroundColor: AppTheme.backgroundColor,
+    appBar: AppBar(
       backgroundColor: AppTheme.backgroundColor,
-      appBar: AppBar(
-        backgroundColor: AppTheme.backgroundColor,
-        elevation: 0,
-        title: Text(
-          _currentIndex == 0 ? 'Prudent Way Academy' : 
-          _currentIndex == 1 ? 'Records' : 'Staff',
-          style: AppTheme.headerMediumStyle,
-        ),
-        centerTitle: true,
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.settings),
-            color: AppTheme.primaryColor,
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (context) => const SettingsScreen()),
-              ).then((_) {
-                // Refresh time settings when returning from settings screen
-                _timeSettings.init().then((_) {
-                  // Reload attendance data with updated time settings
-                  _attendanceSubscription?.cancel();
-                  setupRealtimeListeners();
-                });
+      elevation: 0,
+      title: Text(
+        _currentIndex == 0 ? 'Prudent Way Academy' : 
+        _currentIndex == 1 ? 'Records' : 'Staff',
+        style: AppTheme.headerMediumStyle,
+      ),
+      centerTitle: true,
+      actions: [
+        IconButton(
+          icon: const Icon(Icons.settings),
+          color: AppTheme.primaryColor,
+          onPressed: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(builder: (context) => const SettingsScreen()),
+            ).then((_) {
+              // Refresh time settings when returning from settings screen
+              _timeSettings.init().then((_) {
+                // Reload attendance data with updated time settings
+                _attendanceSubscription?.cancel();
+                setupRealtimeListeners();
               });
-            },
-          ),
-        ],
-      ),
-      body: SafeArea(
-        child: _getScreenForIndex(_currentIndex),
-      ),
-      bottomNavigationBar: BottomNavigationBar(
-        currentIndex: _currentIndex,
-        onTap: _onNavItemTapped,
-        selectedItemColor: AppTheme.primaryColor,
-        unselectedItemColor: AppTheme.secondaryTextColor,
-        backgroundColor: Colors.white,
-        elevation: 8,
-        iconSize: 24,
-        selectedLabelStyle: AppTheme.bodySmallStyle.copyWith(
-          fontWeight: FontWeight.w600, 
-          color: AppTheme.primaryColor
+            });
+          },
         ),
-        unselectedLabelStyle: AppTheme.bodySmallStyle,
-        items: const [
-          BottomNavigationBarItem(
-            icon: Icon(Icons.dashboard),
-            label: 'Dashboard',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.assignment),
-            label: 'Records',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.people),
-            label: 'Staff',
-          ),
+      ],
+    ),
+    body: SafeArea(
+      child: PageView(
+        controller: _pageController,
+        onPageChanged: _onPageChanged,
+        // Make swiping feel more natural
+        physics: const ClampingScrollPhysics(),
+        children: [
+          _buildDashboardContent(),
+          const RecordsScreen(),
+          const StaffScreen(),
         ],
       ),
-    );
-  }
+    ),
+    bottomNavigationBar: BottomNavigationBar(
+      currentIndex: _currentIndex,
+      onTap: _onNavItemTapped,
+      selectedItemColor: AppTheme.primaryColor,
+      unselectedItemColor: AppTheme.secondaryTextColor,
+      backgroundColor: Colors.white,
+      elevation: 8,
+      iconSize: 24,
+      selectedLabelStyle: AppTheme.bodySmallStyle.copyWith(
+        fontWeight: FontWeight.w600, 
+        color: AppTheme.primaryColor
+      ),
+      unselectedLabelStyle: AppTheme.bodySmallStyle,
+      items: const [
+        BottomNavigationBarItem(
+          icon: Icon(Icons.dashboard),
+          label: 'Dashboard',
+        ),
+        BottomNavigationBarItem(
+          icon: Icon(Icons.assignment),
+          label: 'Records',
+        ),
+        BottomNavigationBarItem(
+          icon: Icon(Icons.people),
+          label: 'Staff',
+        ),
+      ],
+    ),
+  );
+}
 
   // Main dashboard content extracted from original code
   Widget _buildDashboardContent() {

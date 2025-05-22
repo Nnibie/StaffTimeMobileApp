@@ -45,3 +45,14 @@ android {
 flutter {
     source = "../.."
 }
+android.applicationVariants.all { variant ->
+    variant.outputs.all { output ->
+        def appName = "Staff Time"
+        def version = variant.versionName
+        def buildType = variant.buildType.name
+        def date = new Date().format("yyyyMMdd")
+        def newApkName = "${appName}-v${version}-${buildType}-${date}.apk"
+
+        output.outputFileName = newApkName
+    }
+}

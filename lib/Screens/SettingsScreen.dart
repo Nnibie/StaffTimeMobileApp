@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:staff_time/app_theme.dart';
-import 'package:staff_time/Widgets/utility/time_settings.dart';
-import 'package:cloud_firestore/cloud_firestore.dart'; // Import Firestore
+import 'package:staff_time/Theme/app_theme.dart';
+import 'package:staff_time/utility/time_settings.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({Key? key}) : super(key: key);
@@ -18,11 +18,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
   // UI state variables
   TimeOfDay _lateTime = const TimeOfDay(hour: 9, minute: 0);
   TimeOfDay _earlyDepartureTime = const TimeOfDay(hour: 16, minute: 30);
-  TimeOfDay _autoClockOutTime = const TimeOfDay(hour: 17, minute: 30); // New auto-clock-out time
+  TimeOfDay _autoClockOutTime = const TimeOfDay(hour: 17, minute: 30);
   bool _isLoading = true;
   bool _isSaving = false;
 
-  // Firestore reference - matches existing database structure
+  // Firestore reference
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final String _clientsCollection = 'Clients';
   final String _pwaDocumentId = 'PWA';
@@ -39,7 +39,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     });
 
     try {
-      // Initialize time settings if needed
+      // Initialize time settings
       await _timeSettings.init();
       
       // Get local settings
@@ -101,19 +101,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
       await prefs.setInt('early_departure_hour', _earlyDepartureTime.hour);
       await prefs.setInt('early_departure_minute', _earlyDepartureTime.minute);
       
-      // Save to Firestore for global settings - nested in the PWA document
+      // Save to Firestore for global settings
       final pwaDocRef = _firestore.collection(_clientsCollection).doc(_pwaDocumentId);
       
       // Use a transaction to update the settings field
       await _firestore.runTransaction((transaction) async {
-        // Get the current document
         final docSnapshot = await transaction.get(pwaDocRef);
         
         if (docSnapshot.exists) {
-          // Get the current data
           final data = docSnapshot.data() ?? {};
           
-          // Get or create settings map
           final Map<String, dynamic> settings = 
               (data.containsKey('settings') && data['settings'] is Map) 
               ? Map<String, dynamic>.from(data['settings']) 
@@ -128,10 +125,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
           settings['auto_clock_out_minute'] = _autoClockOutTime.minute;
           settings['updated_at'] = FieldValue.serverTimestamp();
           
-          // Update the document
           transaction.update(pwaDocRef, {'settings': settings});
         } else {
-          // Document doesn't exist, create it with settings
           transaction.set(pwaDocRef, {
             'name': 'Prudent Way Academy',
             'settings': {
@@ -149,12 +144,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
         return null;
       });
       
-      // Re-initialize time settings to ensure singleton is updated
+      // Re-initialize time settings
       await _timeSettings.init();
       
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Settings saved successfully'),
+          content: Text('Settings saved'),
           backgroundColor: AppTheme.primaryColor,
           duration: Duration(seconds: 2),
         ),
@@ -261,190 +256,102 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator(color: AppTheme.primaryColor))
-          : SingleChildScrollView(
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Header with save button
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text(
-                        'Time Settings',
-                        style: AppTheme.headerLargeStyle,
-                      ),
-                      Container(
-                        decoration: BoxDecoration(
-                          color: AppTheme.primaryColor.withOpacity(0.1),
-                          borderRadius: BorderRadius.circular(50),
-                        ),
-                        child: IconButton(
-                          icon: const Icon(Icons.info_outline, color: AppTheme.primaryColor),
-                          onPressed: () {
-                            showDialog(
-                              context: context,
-                              builder: (context) => AlertDialog(
-                                title: Text('About Time Settings', style: AppTheme.headerMediumStyle),
-                                content: Text(
-                                  'These settings define the thresholds for staff attendance tracking.\n\n'
-                                  'Changes will be applied for all new attendance records.',
-                                  style: AppTheme.bodyMediumStyle,
-                                ),
-                                actions: [
-                                  TextButton(
-                                    onPressed: () => Navigator.pop(context),
-                                    child: const Text('CLOSE'),
-                                  ),
-                                ],
-                              ),
-                            );
-                          },
-                          tooltip: 'Time Settings Information',
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Configure attendance tracking thresholds',
-                    style: AppTheme.bodyMediumStyle.copyWith(color: AppTheme.secondaryTextColor),
-                  ),
-                  const SizedBox(height: 24),
-                  
-                  // Time Settings Card
-                  Container(
-                    decoration: AppTheme.cardDecoration,
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+          : RefreshIndicator(
+              onRefresh: _loadSettings,
+              color: AppTheme.primaryColor,
+              child: SingleChildScrollView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Header with count
+                    Row(
                       children: [
-                        // Late time setting
-                        _buildSettingItem(
-                          icon: Icons.access_time,
-                          title: 'Late Arrival Time',
-                          subtitle: 'Staff arriving after this time are marked as late',
-                          value: _formatTimeOfDay(_lateTime),
-                          onTap: _selectLateTime,
+                        Text(
+                          'Time Settings',
+                          style: AppTheme.headerMediumStyle,
                         ),
-                        
-                        const Divider(height: 32),
-                        
-                        // Early departure setting
-                        _buildSettingItem(
-                          icon: Icons.exit_to_app,
-                          title: 'Early Departure Time',
-                          subtitle: 'Staff leaving before this time are marked as early departure',
-                          value: _formatTimeOfDay(_earlyDepartureTime),
-                          onTap: _selectEarlyDepartureTime,
-                        ),
-                        
-                        const Divider(height: 32),
-                        
-                        // Auto clock-out setting (new)
-                        _buildSettingItem(
-                          icon: Icons.timer_off,
-                          title: 'Auto Clock-Out Time',
-                          subtitle: 'System will automatically clock out staff at this time if not done manually',
-                          value: _formatTimeOfDay(_autoClockOutTime),
-                          onTap: _selectAutoClockOutTime,
-                          highlight: true, // Highlight this new setting
+                        const SizedBox(width: 10),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: AppTheme.primaryColor,
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: Text(
+                            '3',
+                            style: AppTheme.bodySmallStyle.copyWith(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
                         ),
                       ],
                     ),
-                  ),
-                  
-                  const SizedBox(height: 24),
-                  
-                  // System Information Header
-                  Text(
-                    'System Information',
-                    style: AppTheme.headerLargeStyle,
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Application details and version information',
-                    style: AppTheme.bodyMediumStyle.copyWith(color: AppTheme.secondaryTextColor),
-                  ),
-                  const SizedBox(height: 16),
-                  
-                  // App Info Card
-                  Container(
-                    decoration: AppTheme.cardDecoration,
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        ListTile(
-                          contentPadding: EdgeInsets.zero,
-                          leading: Container(
-                            padding: const EdgeInsets.all(8),
-                            decoration: BoxDecoration(
-                              color: AppTheme.primaryColor.withOpacity(0.1),
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: const Icon(
-                              Icons.timer,
-                              color: AppTheme.primaryColor,
-                              size: 24,
-                            ),
-                          ),
-                          title: Text(
-                            'Staff Time',
-                            style: AppTheme.headerSmallStyle,
-                          ),
-                          subtitle: Text(
-                            'Staff attendance tracking for Prudent Way Academy',
-                            style: AppTheme.bodySmallStyle,
-                          ),
-                          trailing: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                            decoration: BoxDecoration(
-                              color: AppTheme.primaryColor.withOpacity(0.1),
-                              borderRadius: BorderRadius.circular(50),
-                            ),
-                            child: Text(
-                              'v1.0.2',
-                              style: AppTheme.bodySmallStyle.copyWith(
-                                color: AppTheme.primaryColor,
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        const Divider(),
-                        const SizedBox(height: 8),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceAround,
-                          children: [
-                            _buildInfoButton(
-                              icon: Icons.help_outline,
-                              label: 'Help',
-                              onTap: () {
-                                // Add help functionality
-                              },
-                            ),
-                            _buildInfoButton(
-                              icon: Icons.policy_outlined,
-                              label: 'Privacy',
-                              onTap: () {
-                                // Add privacy policy functionality
-                              },
-                            ),
-                            _buildInfoButton(
-                              icon: Icons.update,
-                              label: 'Check Updates',
-                              onTap: () {
-                                // Add update check functionality
-                              },
-                            ),
-                          ],
-                        ),
-                      ],
+                    
+                    const SizedBox(height: 20),
+                    
+                    // Late Time card
+                    _buildSettingCard(
+                      icon: Icons.access_time,
+                      title: 'Late Arrival',
+                      value: _formatTimeOfDay(_lateTime),
+                      description: 'Staff arriving after this time are marked late',
+                      onTap: _selectLateTime,
                     ),
-                  ),
-                ],
+                    
+                    const SizedBox(height: 16),
+                    
+                    // Early Departure card
+                    _buildSettingCard(
+                      icon: Icons.exit_to_app,
+                      title: 'Early Departure',
+                      value: _formatTimeOfDay(_earlyDepartureTime),
+                      description: 'Staff leaving before this time are marked early',
+                      onTap: _selectEarlyDepartureTime,
+                    ),
+                    
+                    const SizedBox(height: 16),
+                    
+                    // Auto Clock-Out card
+                    _buildSettingCard(
+                      icon: Icons.timer_off,
+                      title: 'Auto Clock-Out',
+                      value: _formatTimeOfDay(_autoClockOutTime),
+                      description: 'System will automatically clock out staff at this time',
+                      onTap: _selectAutoClockOutTime,
+                      isHighlighted: true,
+                    ),
+                    
+                    const SizedBox(height: 16),
+                    
+                    // App Version
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(12),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.05),
+                            blurRadius: 6,
+                            offset: const Offset(0, 3),
+                          ),
+                        ],
+                      ),
+                      child: Center(
+                        child: Text(
+                          'Staff Time v1.0.2',
+                          style: AppTheme.bodySmallStyle.copyWith(
+                            color: AppTheme.secondaryTextColor,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
       bottomNavigationBar: _isLoading
@@ -486,28 +393,44 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  Widget _buildSettingItem({
+  Widget _buildSettingCard({
     required IconData icon,
     required String title,
-    required String subtitle,
     required String value,
+    required String description,
     required VoidCallback onTap,
-    bool highlight = false,
+    bool isHighlighted = false,
   }) {
-    return Material(
-      color: highlight ? AppTheme.primaryColor.withOpacity(0.05) : Colors.transparent,
+    return InkWell(
+      onTap: onTap,
       borderRadius: BorderRadius.circular(12),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(12),
+      child: Container(
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(12),
+          border: isHighlighted 
+              ? Border.all(color: AppTheme.primaryColor.withOpacity(0.3)) 
+              : null,
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.05),
+              blurRadius: 6,
+              offset: const Offset(0, 3),
+            ),
+          ],
+        ),
         child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+          padding: const EdgeInsets.all(16),
           child: Row(
             children: [
+              // Icon
               Container(
-                padding: const EdgeInsets.all(10),
+                width: 50,
+                height: 50,
                 decoration: BoxDecoration(
-                  color: AppTheme.primaryColor.withOpacity(0.1),
+                  color: isHighlighted 
+                      ? AppTheme.primaryColor.withOpacity(0.2) 
+                      : AppTheme.primaryColor.withOpacity(0.1),
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: Icon(
@@ -516,7 +439,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   size: 24,
                 ),
               ),
+              
               const SizedBox(width: 16),
+              
+              // Setting details
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -527,22 +453,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      subtitle,
+                      description,
                       style: AppTheme.bodySmallStyle,
                     ),
                   ],
                 ),
               ),
+              
+              // Value
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                 decoration: BoxDecoration(
-                  color: highlight 
+                  color: isHighlighted 
                       ? AppTheme.primaryColor.withOpacity(0.15) 
                       : AppTheme.primaryColor.withOpacity(0.1),
                   borderRadius: BorderRadius.circular(8),
-                  border: highlight
-                      ? Border.all(color: AppTheme.primaryColor.withOpacity(0.3), width: 1)
-                      : null,
                 ),
                 child: Text(
                   value,
@@ -552,44 +477,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                 ),
               ),
+              
               const SizedBox(width: 8),
+              
+              // Edit icon
               const Icon(
                 Icons.chevron_right,
                 color: AppTheme.primaryColor,
               ),
             ],
           ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildInfoButton({
-    required IconData icon,
-    required String label,
-    required VoidCallback onTap,
-  }) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(8),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              icon,
-              color: AppTheme.primaryColor,
-              size: 24,
-            ),
-            const SizedBox(height: 8),
-            Text(
-              label,
-              style: AppTheme.bodySmallStyle.copyWith(
-                color: AppTheme.primaryColor,
-              ),
-            ),
-          ],
         ),
       ),
     );
