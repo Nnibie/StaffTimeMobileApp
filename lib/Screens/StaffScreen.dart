@@ -2,11 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shimmer/shimmer.dart';
 import 'package:staff_time/Theme/app_theme.dart';
-
+import 'dart:async';
 import 'staff_info.dart'; 
 
 class StaffScreen extends StatefulWidget {
-  const StaffScreen({Key? key}) : super(key: key);
+  const StaffScreen({super.key});
 
   @override
   State<StaffScreen> createState() => _StaffScreenState();
@@ -16,35 +16,46 @@ class _StaffScreenState extends State<StaffScreen> {
   List<Map<String, dynamic>> staffList = [];
   bool isLoading = true;
   String searchQuery = '';
-  
-  // Firestore path constants
-  final String _clientPath = 'Clients/PWA';
+
+  StreamSubscription<QuerySnapshot>? _staffSubscription;
   
   @override
   void initState() {
     super.initState();
-    loadStaffData();
+    _setupStaffStream();
   }
   
-  Future<void> loadStaffData() async {
+    @override
+  void dispose() {
+    // This is crucial. It closes the stream connection to Firestore
+    // when the widget is removed from the screen, preventing memory leaks.
+    _staffSubscription?.cancel();
+    super.dispose();
+  }
+
+ void _setupStaffStream() {
     setState(() {
       isLoading = true;
     });
-    
-    try {
-      // Fetch staff data from Firestore
-      final snapshot = await FirebaseFirestore.instance
-        .collection('$_clientPath/staff')
-        .get();
-      
+
+    // 1. Point to the correct 'users' collection and filter for staff
+    final query = FirebaseFirestore.instance
+        .collection('Clients/PWA/users')
+        .where('role', isEqualTo: 'staff');
+
+    // 2. Start listening to the stream and assign it to our variable
+    _staffSubscription = query.snapshots().listen((snapshot) {
+      if (!mounted) return; // Safety check: do nothing if the widget is disposed
+
       setState(() {
         staffList = snapshot.docs.map((doc) {
+          final data = doc.data();
           return {
             'id': doc.id,
-            'uuid': doc.id,
-            'firstName': doc['firstName'] ?? '',
-            'lastName': doc['lastName'] ?? '',
-            'profileImageUrl': doc['profileImageUrl'] ?? '',
+            'uuid': data['uuid'] ?? doc.id,
+            'firstName': data['firstName'] ?? '',
+            'lastName': data['lastName'] ?? '',
+            'profileImageUrl': data['profileImageUrl'] ?? '',
           };
         }).toList();
         
@@ -54,12 +65,15 @@ class _StaffScreenState extends State<StaffScreen> {
         
         isLoading = false;
       });
-    } catch (error) {
-      print('Error loading staff data: $error');
+
+    }, onError: (error) {
+      // Handle any errors from the stream
+      print('Error listening to staff stream: $error');
+      if (!mounted) return;
       setState(() {
         isLoading = false;
       });
-    }
+    });
   }
   
   // Filter staff based on search query
@@ -81,7 +95,12 @@ class _StaffScreenState extends State<StaffScreen> {
     return Container(
       color: AppTheme.backgroundColor,
       child: RefreshIndicator(
-        onRefresh: loadStaffData,
+        onRefresh:() async {
+          // The stream provides live updates, so a manual refresh isn't
+          // strictly necessary. We'll just add a small delay to give the
+          // user visual feedback that their pull-to-refresh action was registered.
+          await Future.delayed(const Duration(seconds: 1));
+        },
         color: AppTheme.primaryColor,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,

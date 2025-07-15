@@ -25,9 +25,9 @@ class AttendanceTile extends StatelessWidget {
     required this.isClockInLate,
     required this.clockOutTime,
     this.isClockOutEarly = false,
-    this.isClockOutLate = false,
+    this.isClockOutLate = false, // NOW OPTIONAL
     this.isActive = false,
-    this.isAutoCompleted = false, // Add this line with default value
+    this.isAutoCompleted = false,
     required this.totalHours,
   }) : super(key: key);
 

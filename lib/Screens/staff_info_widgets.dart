@@ -121,8 +121,6 @@ static Widget _buildVerticalDivider() {
 }
 
 /// Builds the attendance breakdown pie chart
-/// Builds the attendance breakdown pie chart
-// Fix for buildAttendanceBreakdownChart
 static Widget buildAttendanceBreakdownChart({
   required int daysEarlyArrival,
   required int daysLate,
@@ -299,8 +297,7 @@ static Widget _buildLegendItem(String label, String value, Color color) {
   
 
   /// Builds the attendance tabs widget with history and performance
-  /// Builds the attendance history widget
-static Widget buildAttendanceTabs(
+  static Widget buildAttendanceTabs(
   BuildContext context,
   TabController tabController, {
   required List<Map<String, dynamic>> attendanceRecords,
@@ -324,7 +321,7 @@ static Widget buildAttendanceTabs(
           ),
         ),
         
-        Container(
+        SizedBox(
           height: 400,
           child: _buildAttendanceHistoryTab(attendanceRecords),
         ),
@@ -363,7 +360,7 @@ static Widget buildAttendanceTabs(
 
 
   
-
+  // MODIFIED: This is the core UI update for the attendance list.
   static Widget _buildAttendanceHistoryTab(List<Map<String, dynamic>> attendanceRecords) {
   if (attendanceRecords.isEmpty) {
     return Center(
@@ -390,17 +387,18 @@ static Widget buildAttendanceTabs(
     itemBuilder: (context, index) {
       final record = attendanceRecords[index];
       final date = record['date'];
-      
-      // Get arrival time - keep normal color logic
+
+      // NEW: Handle forgot to clock-in scenario
+      final bool forgotClockIn = record['forgotClockIn'] ?? false;
       final String arrivalTime = record['arrivalTime'];
-      final String formattedArrivalTime = _formatTimeToAmPm(arrivalTime);
-      
-      // For departure time
+      final String formattedArrivalTime = forgotClockIn ? '--:--' : _formatTimeToAmPm(arrivalTime);
+
+      // Handle departure time
       final departureTime = record['isActive']
           ? '--:--'
           : _formatTimeToAmPm(record['departureTime']);
 
-      // Parse date
+      // Format the date for display
       final DateTime parsedDate = DateFormat('yyyy-MM-dd').parse(date);
       final String displayDate = DateFormat('E, MMM d').format(parsedDate);
 
@@ -418,15 +416,23 @@ static Widget buildAttendanceTabs(
         }
       }
 
-      // Get the color for the arrival time based on status
-      Color arrivalTimeColor = record['isLate'] 
-          ? AppTheme.lateColor  // Red for late
-          : AppTheme.presentColor;  // Green for on time
+      // MODIFIED: Determine the color for the arrival time text
+      Color arrivalTimeColor;
+      if (forgotClockIn) {
+        // Orange for forgotten clock-in
+        arrivalTimeColor = Colors.orange; 
+      } else if (record['isLate']) {
+        // Red for late
+        arrivalTimeColor = AppTheme.lateColor; 
+      } else {
+        // Green for on-time or early
+        arrivalTimeColor = AppTheme.presentColor;
+      }
       
-      // Get color for departure time - make it orange if auto-completed
+      // MODIFIED: Determine the color for departure time (orange if auto-completed)
       Color departureTimeColor = record['isAutoCompleted']
-          ? Colors.orange  // Orange for auto-completed
-          : AppTheme.primaryTextColor;  // Default text color
+          ? Colors.orange
+          : AppTheme.primaryTextColor;
 
       return Container(
         padding: const EdgeInsets.symmetric(vertical: 12),
@@ -434,22 +440,17 @@ static Widget buildAttendanceTabs(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // Date column
-            Container(
+            SizedBox(
               width: 80,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    displayDate,
-                    style: AppTheme.bodyMediumStyle.copyWith(
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ],
+              child: Text(
+                displayDate,
+                style: AppTheme.bodyMediumStyle.copyWith(
+                  fontWeight: FontWeight.w500,
+                ),
               ),
             ),
 
-            // Times column
+            // Times and status column
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -461,32 +462,26 @@ static Widget buildAttendanceTabs(
                       Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(
-                            'In',
-                            style: AppTheme.bodySmallStyle,
-                          ),
+                          Text('In', style: AppTheme.bodySmallStyle),
                           Text(
                             formattedArrivalTime,
                             style: AppTheme.bodyMediumStyle.copyWith(
-                              color: arrivalTimeColor,
+                              color: arrivalTimeColor, // MODIFIED: Apply dynamic color
                               fontWeight: FontWeight.w500,
                             ),
                           ),
                         ],
                       ),
 
-                      // Departure time - this will be orange if auto-completed
+                      // Departure time
                       Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(
-                            'Out',
-                            style: AppTheme.bodySmallStyle,
-                          ),
+                          Text('Out', style: AppTheme.bodySmallStyle),
                           Text(
                             departureTime,
                             style: AppTheme.bodyMediumStyle.copyWith(
-                              color: departureTimeColor,
+                              color: departureTimeColor, // MODIFIED: Apply dynamic color
                               fontWeight: FontWeight.w500,
                             ),
                           ),
@@ -497,10 +492,7 @@ static Widget buildAttendanceTabs(
                       Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(
-                            'Hours',
-                            style: AppTheme.bodySmallStyle,
-                          ),
+                          Text('Hours', style: AppTheme.bodySmallStyle),
                           Text(
                             hoursWorked,
                             style: AppTheme.bodyMediumStyle.copyWith(
@@ -514,20 +506,18 @@ static Widget buildAttendanceTabs(
 
                   const SizedBox(height: 5),
 
-                  // Status indicators - REMOVED Auto Completed tag
+                  // Status tags
                   Row(
                     children: [
+                      // NEW: Show a specific tag for a forgotten clock-in
+                      if (forgotClockIn)
+                        _buildStatusTag('Missed Clock-In', Colors.orange),
                       if (record['isLate'])
                         _buildStatusTag('Late', AppTheme.lateColor),
                       if (record['isEarlyDeparture'] && !record['isActive'])
-                        Container(
-                          margin: const EdgeInsets.only(right: 5),
-                          child: _buildStatusTag(
-                              'Left Early', AppTheme.lateColor),
-                        ),
+                        _buildStatusTag('Left Early', AppTheme.lateColor),
                       if (record['isActive'])
                         _buildStatusTag('Active', AppTheme.activeColor),
-                      // Removed the Auto Completed tag as requested
                     ],
                   ),
                 ],

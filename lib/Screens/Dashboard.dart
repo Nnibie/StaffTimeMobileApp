@@ -1,4 +1,3 @@
-
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:staff_time/Widgets/AttendanceTile.dart';
@@ -7,18 +6,18 @@ import 'package:staff_time/Theme/app_theme.dart';
 import 'package:staff_time/Screens/SettingsScreen.dart';
 import 'package:staff_time/Screens/RecordsScreen.dart';
 import 'package:staff_time/Screens/StaffScreen.dart';
-import 'package:staff_time/utility/time_settings.dart'; // Import TimeSettings utility
-import 'package:shimmer/shimmer.dart'; // Add shimmer package for skeleton loading
+import 'package:staff_time/utility/time_settings.dart';
+import 'package:shimmer/shimmer.dart';
 import 'dart:async';
 
 class Dashboard extends StatefulWidget {
-  const Dashboard({Key? key}) : super(key: key);
+  const Dashboard({super.key});
 
   @override
   State<Dashboard> createState() => _DashboardState();
 }
 
-class _DashboardState extends State<Dashboard> {
+class _DashboardState extends State<Dashboard> with TickerProviderStateMixin {
   String _selectedFilter = 'All';
   final List<String> _filters = ['All', 'Early', 'Late', 'Absent'];
   
@@ -29,7 +28,7 @@ class _DashboardState extends State<Dashboard> {
   
   // Store attendance data
   List<Map<String, dynamic>> attendanceRecords = [];
-  List<Map<String, dynamic>> staffData = [];
+  List<Map<String, dynamic>> staffUserData = []; 
   bool isLoading = true;
   
   // Attendance metrics
@@ -40,20 +39,42 @@ class _DashboardState extends State<Dashboard> {
   
   // Stream subscriptions for realtime updates
   StreamSubscription<QuerySnapshot>? _attendanceSubscription;
-  StreamSubscription<QuerySnapshot>? _staffSubscription;
+   StreamSubscription<QuerySnapshot>? _userSubscription;
   
   // Firestore path constants for new structure
-  final String _clientId = 'PWA';
-  final String _clientPath = 'Clients/PWA';
+final String _clientId = 'PWA';
   
   // Time settings instance
   final TimeSettings _timeSettings = TimeSettings();
+  
+  // Animation controller for new arrivals
+  late AnimationController _newArrivalController;
+  late Animation<double> _newArrivalAnimation;
+  
+  // Track previous attendance records for detecting new arrivals
+  List<String> _previousAttendanceIds = [];
+  String? _latestArrivalId;
   
   @override
 void initState() {
   super.initState();
   // Initialize PageController with current index
   _pageController = PageController(initialPage: _currentIndex);
+  
+  // Initialize animation controller for new arrivals
+  _newArrivalController = AnimationController(
+    duration: const Duration(milliseconds: 600),
+    vsync: this,
+  );
+  
+  _newArrivalAnimation = Tween<double>(
+    begin: 0.0,
+    end: 1.0,
+  ).animate(CurvedAnimation(
+    parent: _newArrivalController,
+    curve: Curves.easeOutBack,
+  ));
+  
   _initializeTimeSettings();
 }
   
@@ -73,106 +94,118 @@ void initState() {
 void dispose() {
   // Cancel subscriptions when widget is disposed
   _attendanceSubscription?.cancel();
-  _staffSubscription?.cancel();
+ _userSubscription?.cancel();
   
-  // Dispose the page controller
+  // Dispose controllers
   _pageController.dispose();
+  _newArrivalController.dispose();
   
   super.dispose();
 }
   
-  void setupRealtimeListeners() {
+ void setupRealtimeListeners() {
     setState(() {
       isLoading = true;
     });
-    
-    // Get today's date in string format YYYY-MM-DD
+
     final now = DateTime.now();
     final today = DateFormat('yyyy-MM-dd').format(now);
-    
-    // Set up realtime listener for staff collection (previously teachers)
-    _staffSubscription = FirebaseFirestore.instance
-      .collection('$_clientPath/staff')
+
+    // --- LISTENER 1: FETCH USERS WITH "staff" ROLE ---
+    // The path is now built dynamically using _clientId
+    _userSubscription = FirebaseFirestore.instance
+      .collection('Clients/$_clientId/users') // DYNAMIC PATH
+      .where('role', isEqualTo: 'staff')
       .snapshots()
       .listen((snapshot) {
-        staffData = snapshot.docs.map((doc) {
+        staffUserData = snapshot.docs.map((doc) {
+          final data = doc.data();
           return {
             'id': doc.id,
-            'uuid': doc.id, 
-            'firstName': doc['firstName'],
-            'lastName': doc['lastName'],
-            'profileImageUrl': doc['profileImageUrl'],
+            'uuid': data['uuid'],
+            'firstName': data['firstName'],
+            'lastName': data['lastName'],
+            'profileImageUrl': data['profileImageUrl'],
           };
         }).toList();
-              
-        totalStaff = staffData.length;
-        
-        // After staff data is loaded, update attendance metrics
+
+        totalStaff = staffUserData.length;
         _updateAttendanceMetrics();
-        
-        setState(() {});
+        if (mounted) setState(() {});
+
       }, onError: (error) {
-        print('Error getting staff: $error');
-        setState(() {
-          isLoading = false;
-        });
+        print('Error getting users for client $_clientId: $error'); // Enhanced logging
+        if (mounted) setState(() => isLoading = false);
       });
-    
-    // Set up realtime listener for today's attendance - from new path
+
+    // --- LISTENER 2: FETCH TODAY'S ATTENDANCE FOR "staff" ROLE ---
+    // The path is now built dynamically using _clientId
     _attendanceSubscription = FirebaseFirestore.instance
-        .collection('$_clientPath/attendance')
+        .collection('Clients/$_clientId/attendance_test') // DYNAMIC PATH
         .where('date', isEqualTo: today)
+        .where('role', isEqualTo: 'staff')
         .snapshots()
         .listen((snapshot) {
-          final List<String> presentStaffIds = [];
+          final newAttendanceRecords = snapshot.docs.map((doc) {
+            final data = doc.data();
+            
+            final Timestamp? clockInTimestamp = data['clockIn'];
+            final Timestamp? clockOutTimestamp = data['clockOut'];
+            
+            final DateTime? clockInTime = clockInTimestamp?.toDate();
+            final DateTime? clockOutTime = clockOutTimestamp?.toDate();
+            
+            final isLate = clockInTime != null ? _timeSettings.isTimeLate(DateFormat('HH:mm').format(clockInTime)) : false;
+            final isEarlyDeparture = clockOutTime != null ? _timeSettings.isEarlyDeparture(DateFormat('HH:mm').format(clockOutTime)) : false;
+            final isActive = clockOutTime == null && clockInTime != null;
+            final isAutoCompleted = data['auto_completed'] ?? false;
+            
+            return {
+              'id': doc.id,
+              'staffId': data['userId'],
+              'staffName': data['userName'],
+              'clockIn': clockInTime,
+              'clockOut': clockOutTime,
+              'isLate': isLate,
+              'isActive': isActive,
+              'isEarlyDeparture': isEarlyDeparture,
+              'isAutoCompleted': isAutoCompleted,
+            };
+          }).toList();
           
-          attendanceRecords = snapshot.docs
-              .map((doc) {
-                final data = doc.data();
-                
-                // Get staffId from staff_id
-                final staffId = data['staff_id'];
-                presentStaffIds.add(staffId);
-                
-                // Check if staff is late (using time settings)
-                final arrivalTime = data['arrival_time'];
-                final isLate = _timeSettings.isTimeLate(arrivalTime);
-                
-                // Check if departure_time exists and is not empty
-                final departureTime = data['departure_time'] ?? '';
-                final isActive = departureTime == ''; // Staff is active if there's no departure time
-                
-                // Add auto_completed field check
-                final isAutoCompleted = data['auto_completed'] ?? false;
-                
-                return {
-                  'id': doc.id,
-                  'staffId': staffId,
-                  'arrivalTime': arrivalTime,
-                  'departureTime': departureTime,
-                  'staffName': data['staff_name'],
-                  'date': data['date'],
-                  'isLate': isLate,
-                  'isActive': isActive, // Employee is active if there's no departure time
-                  'isEarlyDeparture': _timeSettings.isEarlyDeparture(departureTime),
-                  'isAutoCompleted': isAutoCompleted, // Add this property
-                };
-              })
-              .toList();
+          newAttendanceRecords.sort((a, b) {
+            final aTime = a['clockIn'] as DateTime?;
+            final bTime = b['clockIn'] as DateTime?;
+            if (aTime == null && bTime == null) return 0;
+            if (aTime == null) return 1;
+            if (bTime == null) return -1;
+            return bTime.compareTo(aTime);
+          });
           
-          // Update attendance metrics
+          if (!isLoading) {
+            final currentIds = newAttendanceRecords.map((record) => record['id'] as String).toList();
+            final newIds = currentIds.where((id) => !_previousAttendanceIds.contains(id)).toList();
+            if (newIds.isNotEmpty) {
+              _latestArrivalId = newIds.first;
+              _newArrivalController.reset();
+              _newArrivalController.forward();
+            }
+            _previousAttendanceIds = currentIds;
+          }
+          
+          attendanceRecords = newAttendanceRecords;
           _updateAttendanceMetrics();
           
-          setState(() {
-            isLoading = false;
-          });
+          if (mounted) setState(() => isLoading = false);
+
         }, onError: (error) {
-          print('Error getting attendance: $error');
-          setState(() {
-            isLoading = false;
-          });
+          print('Error getting attendance for client $_clientId: $error'); // Enhanced logging
+          if (mounted) setState(() => isLoading = false);
         });
   }
+
+  
+  
   
   void _updateAttendanceMetrics() {
     // Count present staff (those with attendance records)
@@ -187,51 +220,27 @@ void dispose() {
   }
   
   // Calculate total hours worked
-  String _calculateTotalHours(String arrivalTime, String departureTime) {
-    // Return empty string if departure time is empty (still active)
-    if (departureTime == '') return '';
-    
+  String _calculateTotalHours(DateTime? clockIn, DateTime? clockOut) {
+    // If either time is missing, we cannot calculate the total duration.
+    if (clockIn == null || clockOut == null) return '';
+
     try {
-      final arrival = _parseTimeString(arrivalTime);
-      final departure = _parseTimeString(departureTime);
-      
-      final difference = departure.difference(arrival);
+      final difference = clockOut.difference(clockIn);
+      // Handle cases where clock-out might be before clock-in (data error)
+      if (difference.isNegative) return 'Error';
+
       final hours = difference.inHours;
       final minutes = difference.inMinutes % 60;
       
       return '${hours}h ${minutes}m';
     } catch (e) {
-      return '';
+      return ''; // Return empty if any other error occurs
     }
   }
   
-  // Parse time string (HH:MM) to DateTime
-  DateTime _parseTimeString(String timeString) {
-    final timeParts = timeString.split(':');
-    final hour = int.parse(timeParts[0]);
-    final minute = int.parse(timeParts[1]);
-    
-    final now = DateTime.now();
-    return DateTime(now.year, now.month, now.day, hour, minute);
-  }
+ 
   
-  // Format time from 24h to 12h format
-  String _formatTimeToAmPm(String time24h) {
-    try {
-      if (time24h == '') return '--:--';
-      
-      final timeParts = time24h.split(':');
-      final hour = int.parse(timeParts[0]);
-      final minute = int.parse(timeParts[1]);
-      
-      final period = hour >= 12 ? 'PM' : 'AM';
-      final hour12 = hour == 0 ? 12 : (hour > 12 ? hour - 12 : hour);
-      
-      return '$hour12:${minute.toString().padLeft(2, '0')} $period';
-    } catch (e) {
-      return '--:--';
-    }
-  }
+ 
 
   // Handler to navigate between screens with animation
 void _onNavItemTapped(int index) {
@@ -245,20 +254,6 @@ void _onNavItemTapped(int index) {
     _currentIndex = index;
   });
 }
-
-  // Method to get the appropriate screen based on nav index
-  Widget _getScreenForIndex(int index) {
-    switch (index) {
-      case 0:
-        return _buildDashboardContent();
-      case 1:
-        return const RecordsScreen();
-      case 2:
-        return const StaffScreen();
-      default:
-        return _buildDashboardContent();
-    }
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -297,7 +292,6 @@ void _onNavItemTapped(int index) {
       child: PageView(
         controller: _pageController,
         onPageChanged: _onPageChanged,
-        // Make swiping feel more natural
         physics: const ClampingScrollPhysics(),
         children: [
           _buildDashboardContent(),
@@ -337,7 +331,7 @@ void _onNavItemTapped(int index) {
   );
 }
 
-  // Main dashboard content extracted from original code
+  // Main dashboard content
   Widget _buildDashboardContent() {
     // Get current date
     final now = DateTime.now();
@@ -346,7 +340,6 @@ void _onNavItemTapped(int index) {
 
     return RefreshIndicator(
       onRefresh: () async {
-        // Manual refresh - reinitialize time settings and reload data
         await _timeSettings.init();
         await Future.delayed(const Duration(milliseconds: 300));
         _attendanceSubscription?.cancel();
@@ -377,7 +370,7 @@ void _onNavItemTapped(int index) {
               ),
             ),
             
-            // Attendance Summary Cards - with skeleton loading when needed
+            // Attendance Summary Cards
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 20),
               child: Container(
@@ -416,21 +409,176 @@ void _onNavItemTapped(int index) {
               ),
             ),
             
-            // Attendance Tiles - with skeleton loading when needed
+            // Attendance Tiles
             const SizedBox(height: 15),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 20),
               child: isLoading 
                 ? _buildSkeletonAttendanceTiles()
-                : Column(
-                    children: _buildAttendanceTiles(),
-                  ),
+                : _buildAttendanceTiles(),
             ),
             const SizedBox(height: 20),
           ],
         ),
       ),
     );
+  }
+
+  // Build attendance tiles with proper animation
+  Widget _buildAttendanceTiles() {
+    final tiles = _getFilteredAttendanceTiles();
+    
+    if (tiles.isEmpty) {
+      return Container(
+        padding: const EdgeInsets.all(20),
+        alignment: Alignment.center,
+        child: Text(
+          'No ${_selectedFilter.toLowerCase()} staff today',
+          style: AppTheme.bodyMediumStyle.copyWith(
+            color: AppTheme.secondaryTextColor,
+          ),
+        ),
+      );
+    }
+    
+    return Column(
+      children: tiles.asMap().entries.map((entry) {
+       
+        final tileData = entry.value;
+        
+        // Check if this is the latest arrival for animation
+        final isLatestArrival = tileData['id'] == _latestArrivalId;
+        
+        Widget tile = _buildAttendanceTileWidget(tileData);
+        
+        // Apply animation only to the latest arrival
+        if (isLatestArrival && _latestArrivalId != null) {
+          tile = AnimatedBuilder(
+            animation: _newArrivalAnimation,
+            builder: (context, child) {
+              return Transform.translate(
+                offset: Offset(0, -30 * (1 - _newArrivalAnimation.value)),
+                child: Opacity(
+                  opacity: _newArrivalAnimation.value.clamp(0.0, 1.0),
+                  child: child,
+                ),
+              );
+            },
+            child: tile,
+          );
+        }
+        
+        return Container(
+          margin: const EdgeInsets.only(bottom: 10),
+          child: tile,
+        );
+      }).toList(),
+    );
+  }
+
+  // Get filtered attendance data
+  List<Map<String, dynamic>> _getFilteredAttendanceTiles() {
+    // --- Filter 1: Handle 'Absent' Staff ---
+    // This must be handled first as it uses a different data source.
+    if (_selectedFilter == 'Absent') {
+      // Get a unique set of IDs for all staff who have clocked in today.
+      final presentStaffIds = attendanceRecords.map((record) => record['staffId'] as String).toSet();
+      
+      // Filter the main staff user list to find who is NOT in the present list.
+      return staffUserData
+          .where((staff) => !presentStaffIds.contains(staff['uuid']))
+          .map((staff) {
+            // Create a special map for the absent tile.
+            return {
+              'id': 'absent_${staff['uuid']}', // Create a unique ID for the key
+              'staffId': staff['uuid'],
+              'staffName': '${staff['firstName']} ${staff['lastName']}',
+              'isAbsent': true, // The flag to identify this as an absent tile
+              'profileImageUrl': staff['profileImageUrl'],
+              'clockIn': null, // Add null fields for type consistency
+              'clockOut': null,
+            };
+          })
+          .toList();
+    }
+    
+    // --- Filter 2: Handle Present Staff (All, Late, Early) ---
+    // These filters operate on the 'attendanceRecords' list.
+    List<Map<String, dynamic>> filteredRecords;
+
+    if (_selectedFilter == 'All') {
+      // Return all records without any filtering.
+      filteredRecords = attendanceRecords;
+
+    } else if (_selectedFilter == 'Late') {
+      // Return only records where the 'isLate' flag is true.
+      filteredRecords = attendanceRecords
+          .where((record) => record['isLate'] == true)
+          .toList();
+
+    } else if (_selectedFilter == 'Early') {
+      // "Early" is defined as not late.
+      // We also ensure there's a clock-in time to exclude "forgot to clock in" cases.
+      filteredRecords = attendanceRecords
+          .where((record) => record['isLate'] == false && record['clockIn'] != null)
+          .toList();
+
+    } else {
+      // Default case if the filter is somehow unrecognized.
+      filteredRecords = attendanceRecords;
+    }
+    
+    return filteredRecords;
+  }
+
+
+  // Build individual attendance tile widget
+  Widget _buildAttendanceTileWidget(Map<String, dynamic> tileData) {
+    if (tileData['isAbsent'] == true) {
+      final staffName = tileData['staffName'];
+      final nameParts = staffName.split(' ');
+      final initials = nameParts.map((part) => part.isNotEmpty ? part[0] : '').join('');
+      
+      return AttendanceTile(
+        name: staffName,
+        department: 'Staff',
+        initials: initials,
+        photoUrl: tileData['profileImageUrl'],
+        clockInTime: 'Absent',
+        isClockInLate: false,
+        clockOutTime: '--:--',
+        totalHours: '',
+      );
+    } else {
+      final staffId = tileData['staffId'];
+      // CHANGED: Use staffUserData list now
+      final staffRecord = staffUserData.firstWhere(
+        (t) => t['uuid'] == staffId,
+        orElse: () => {'profileImageUrl': null},
+      );
+      
+      final staffName = tileData['staffName'];
+      final nameParts = staffName.split(' ');
+      final initials = nameParts.map((part) => part.isNotEmpty ? part[0] : '').join('');
+
+      final arrivalTimeFormatted = _formatDateTimeToAmPm(tileData['clockIn']);
+      final departureTimeFormatted = _formatDateTimeToAmPm(tileData['clockOut']);
+      final totalHours = _calculateTotalHours(tileData['clockIn'], tileData['clockOut']);
+      
+      return AttendanceTile(
+        name: staffName,
+        department: 'Staff',
+        initials: initials,
+        photoUrl: staffRecord['profileImageUrl'],
+        clockInTime: arrivalTimeFormatted,
+        isClockInLate: tileData['isLate'],
+        clockOutTime: departureTimeFormatted,
+        isActive: tileData['isActive'],
+        isClockOutEarly: tileData['isEarlyDeparture'],
+        isAutoCompleted: tileData['isAutoCompleted'],
+        totalHours: totalHours,
+      );
+    }
   }
 
   // Skeleton loading for summary cards
@@ -648,133 +796,12 @@ void _onNavItemTapped(int index) {
       ),
     );
   }
-
-  // Create the list of attendance tiles based on filter
-  List<Widget> _buildAttendanceTiles() {
-    // Get filtered records
-    List<Map<String, dynamic>> filteredRecords = [];
-    List<String> absentStaffIds = [];
-    
-    // Find absent staff - only needed for 'Absent' filter
-    if (_selectedFilter == 'Absent') {
-      final presentStaffIds = attendanceRecords.map((record) => record['staffId'] as String).toSet();
-      absentStaffIds = staffData
-          .map((staff) => staff['uuid'] as String)
-          .where((uuid) => !presentStaffIds.contains(uuid))
-          .toList();
-    }
-    
-    // Filter based on selection
-    if (_selectedFilter == 'All') {
-      filteredRecords = attendanceRecords;
-    } else if (_selectedFilter == 'Late') {
-      filteredRecords = attendanceRecords.where((record) => record['isLate'] == true).toList();
-    } else if (_selectedFilter == 'Early') {
-      filteredRecords = attendanceRecords.where((record) => record['isLate'] == false).toList();
-    }
-    
-    // If no records after filtering, show message
-    if (filteredRecords.isEmpty && (_selectedFilter != 'Absent' || absentStaffIds.isEmpty)) {
-      return [
-        Container(
-          padding: const EdgeInsets.all(20),
-          alignment: Alignment.center,
-          child: Text(
-            'No ${_selectedFilter.toLowerCase()} staff today',
-            style: AppTheme.bodyMediumStyle.copyWith(
-              color: AppTheme.secondaryTextColor,
-            ),
-          ),
-        ),
-      ];
-    }
-    
-    // Create tiles for present staff
-    final List<Widget> presentTiles = filteredRecords.map<Widget>((record) {
-      // Find staff data to get profile image
-      final staffId = record['staffId'];
-      final staffRecord = staffData.firstWhere(
-        (t) => t['uuid'] == staffId,
-        orElse: () => {'profileImageUrl': null},
-      );
-      
-      // Get staff name and prepare initials
-      final staffName = record['staffName'];
-      final nameParts = staffName.split(' ');
-      String initials = '';
-      if (nameParts.isNotEmpty) {
-        initials = nameParts.map((part) => part.isNotEmpty ? part[0] : '').join('');
-      }
-      
-      final arrivalTimeFormatted = _formatTimeToAmPm(record['arrivalTime']);
-      
-      // Format departure time based on active status
-      final departureTimeFormatted = record['isActive'] ? 
-          '--:--' : _formatTimeToAmPm(record['departureTime']);
-      
-      // Calculate total hours only for inactive employees
-      final totalHours = record['isActive'] ? 
-          '' : _calculateTotalHours(record['arrivalTime'], record['departureTime']);
-      
-      return AttendanceTile(
-        name: staffName,
-        department: 'Staff',  // Changed from 'Teacher' to 'Staff'
-        initials: initials,
-        photoUrl: staffRecord['profileImageUrl'],
-        clockInTime: arrivalTimeFormatted,
-        isClockInLate: record['isLate'],
-        clockOutTime: departureTimeFormatted,
-        isActive: record['isActive'],
-        isClockOutEarly: !record['isActive'] && record['isEarlyDeparture'],
-        isAutoCompleted: record['isAutoCompleted'], // Add this property
-        totalHours: totalHours,
-      );
-    }).toList();
-    
-    // Create tiles for absent staff - only for 'Absent' filter
-    if (_selectedFilter == 'Absent') {
-      final List<Widget> absentTiles = absentStaffIds.map<Widget>((uuid) {
-        final staff = staffData.firstWhere(
-          (t) => t['uuid'] == uuid,
-          orElse: () => {'firstName': '', 'lastName': '', 'profileImageUrl': null},
-        );
-        
-        final fullName = '${staff['firstName']} ${staff['lastName']}';
-        final initials = staff['firstName'].isNotEmpty && staff['lastName'].isNotEmpty
-            ? '${staff['firstName'][0]}${staff['lastName'][0]}'
-            : '';
-        
-        return AttendanceTile(
-          name: fullName,
-          department: 'Staff',  // Changed from 'Teacher' to 'Staff'
-          initials: initials,
-          photoUrl: staff['profileImageUrl'],
-          clockInTime: 'Absent',
-          isClockInLate: false,
-          clockOutTime: '--:--',
-          isClockOutEarly: false,
-          isAutoCompleted: false, // Not applicable for absent staff
-          totalHours: '',
-        );
-      }).toList();
-      
-      return absentTiles.isEmpty
-          ? [
-              Container(
-                padding: const EdgeInsets.all(20),
-                alignment: Alignment.center,
-                child: Text(
-                  'No absent staff today',
-                  style: AppTheme.bodyMediumStyle.copyWith(
-                    color: AppTheme.secondaryTextColor,
-                  ),
-                ),
-              ),
-            ]
-          : absentTiles;
-    }
-    
-    // For All, Early, Late filters - just return the present tiles
-    return presentTiles;
-  }
 }
+
+String _formatDateTimeToAmPm(DateTime? dt) {
+    // If the datetime is null (e.g., forgot to clock in/out), display '--:--'
+    if (dt == null) return '--:--';
+    
+    // Use the intl package to format the time correctly
+    return DateFormat('h:mm a').format(dt);
+  }
