@@ -1,6 +1,6 @@
 import 'package:intl/intl.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:staff_time/utility/time_settings.dart';
+import 'package:flutter/material.dart';
 
 class StaffStats {
   final int totalAttendanceDays;
@@ -8,6 +8,7 @@ class StaffStats {
   final int daysEarlyArrival;
   final int daysLate;
   final int daysAbsent;
+  final int daysMissedIn; // MODIFIED: Added to track missed clock-ins
   final String averageArrivalTime;
   final String averageDepartureTime;
   final double averageHoursWorked;
@@ -19,6 +20,7 @@ class StaffStats {
     required this.daysEarlyArrival,
     required this.daysLate,
     required this.daysAbsent,
+    required this.daysMissedIn, // MODIFIED: Added to constructor
     required this.averageArrivalTime,
     required this.averageDepartureTime,
     required this.averageHoursWorked,
@@ -27,7 +29,6 @@ class StaffStats {
 }
 
 class StaffInfoUtils {
-  
   /// Calculate attendance statistics based on the processed attendance records.
   static void calculateStats({
     required List<Map<String, dynamic>> attendanceRecords,
@@ -36,14 +37,16 @@ class StaffInfoUtils {
     required DateTime endDate,
     required Function(StaffStats) onStatsCalculated,
   }) {
-    // If there are no records, return an empty stats object.
+    // FIX: Reset all stats including the new daysMissedIn
     if (attendanceRecords.isEmpty) {
+      final workDays = _calculateWorkDaysBetween(startDate, endDate);
       onStatsCalculated(StaffStats(
-        totalAttendanceDays: 0,
+        totalAttendanceDays: workDays,
         daysPresent: 0,
         daysEarlyArrival: 0,
         daysLate: 0,
-        daysAbsent: 0,
+        daysAbsent: workDays, // If no records, all workdays are absent
+        daysMissedIn: 0,
         averageArrivalTime: '--:--',
         averageDepartureTime: '--:--',
         averageHoursWorked: 0,
@@ -52,42 +55,46 @@ class StaffInfoUtils {
       return;
     }
 
-    // Calculate the total number of working days in the selected date range.
     int workDaysCount = _calculateWorkDaysBetween(startDate, endDate);
-    
-    // Initialize counters and accumulators.
-    int daysPresent = attendanceRecords.length;
+
+    int daysPresent = 0;
     int daysEarlyArrival = 0;
     int daysLate = 0;
-    
+    int daysMissedIn = 0; // FIX: New counter for missed clock-ins
+
     int totalMinutesWorked = 0;
     int daysWithHoursCalculated = 0;
     List<int> arrivalMinutesList = [];
     List<int> departureMinutesList = [];
 
-    // Process each record to calculate detailed stats.
     for (var record in attendanceRecords) {
       final String arrivalTime = record['arrivalTime'] ?? '';
       final String departureTime = record['departureTime'] ?? '';
-      
-      // A day is only 'Late' if the flag is explicitly true.
-      if (record['isLate'] == true) {
-        daysLate++;
-      }
-      
-      // A day is 'Early' if there's an arrival time and it's before the expected time.
-      if (arrivalTime.isNotEmpty) {
-        if (_isEarlyArrival(timeSettings, arrivalTime)) {
-          daysEarlyArrival++;
+
+      // FIX: Check for 'forgotClockIn' flag first. This is a "missed in" day.
+      if (record['forgotClockIn'] == true) {
+        daysMissedIn++;
+      } else {
+        // Only if they did not forget to clock in, we count them as "present".
+        daysPresent++;
+
+        if (record['isLate'] == true) {
+          daysLate++;
         }
-        arrivalMinutesList.add(_parseTimeToMinutes(arrivalTime));
+
+        if (arrivalTime.isNotEmpty) {
+          if (_isEarlyArrival(timeSettings, arrivalTime)) {
+            daysEarlyArrival++;
+          }
+          arrivalMinutesList.add(parseTimeToMinutes(arrivalTime));
+        }
       }
 
-      // Calculate hours worked only if both arrival and departure times are available.
+      // Hour calculation should still work even if they missed clock-in but have a clock-out
       if (arrivalTime.isNotEmpty && departureTime.isNotEmpty) {
-        final int arrivalMinutes = _parseTimeToMinutes(arrivalTime);
-        final int departureMinutes = _parseTimeToMinutes(departureTime);
-        
+        final int arrivalMinutes = parseTimeToMinutes(arrivalTime);
+        final int departureMinutes = parseTimeToMinutes(departureTime);
+
         if (departureMinutes > arrivalMinutes) {
           totalMinutesWorked += (departureMinutes - arrivalMinutes);
           daysWithHoursCalculated++;
@@ -95,40 +102,43 @@ class StaffInfoUtils {
         departureMinutesList.add(departureMinutes);
       }
     }
-    
-    // Calculate absent days.
-    final int absentDays = workDaysCount > daysPresent ? workDaysCount - daysPresent : 0;
-    
-    // Calculate average times and hours.
+
+    // FIX: Absent days are total workdays minus all other categories.
+    final int accountedForDays = daysPresent + daysMissedIn;
+    final int absentDays = workDaysCount > accountedForDays
+        ? workDaysCount - accountedForDays
+        : 0;
+
     String averageArrivalTime = '--:--';
     if (arrivalMinutesList.isNotEmpty) {
       final int totalMinutes = arrivalMinutesList.reduce((a, b) => a + b);
       final int avgMinutes = totalMinutes ~/ arrivalMinutesList.length;
       averageArrivalTime = _formatMinutesToTime(avgMinutes);
     }
-    
+
     String averageDepartureTime = '--:--';
     if (departureMinutesList.isNotEmpty) {
       final int totalMinutes = departureMinutesList.reduce((a, b) => a + b);
       final int avgMinutes = totalMinutes ~/ departureMinutesList.length;
       averageDepartureTime = _formatMinutesToTime(avgMinutes);
     }
-    
+
     double averageHoursWorked = 0;
     if (daysWithHoursCalculated > 0) {
       averageHoursWorked = (totalMinutesWorked / daysWithHoursCalculated) / 60;
     }
-    
-    // Calculate weekly trend data for charts.
-    List<double> weeklyAttendanceData = _calculateWeeklyTrend(attendanceRecords);
-    
-    // Return the final calculated stats.
+
+    List<double> weeklyAttendanceData =
+        _calculateWeeklyTrend(attendanceRecords);
+
+    // FIX: Pass the new daysMissedIn value to the StaffStats object.
     onStatsCalculated(StaffStats(
       totalAttendanceDays: workDaysCount,
       daysPresent: daysPresent,
       daysEarlyArrival: daysEarlyArrival,
       daysLate: daysLate,
       daysAbsent: absentDays,
+      daysMissedIn: daysMissedIn,
       averageArrivalTime: averageArrivalTime,
       averageDepartureTime: averageDepartureTime,
       averageHoursWorked: averageHoursWorked,
@@ -139,33 +149,38 @@ class StaffInfoUtils {
   /// Helper method to check if an arrival time is considered early.
   static bool _isEarlyArrival(TimeSettings timeSettings, String arrivalTime) {
     if (arrivalTime.isEmpty) return false;
-  
-    final int expectedArrivalMinutes = timeSettings.expectedArrivalMinutes;
-    final int actualArrivalMinutes = _parseTimeToMinutes(arrivalTime);
-  
-    // It's an early arrival if it's before the official start time.
+
+    final TimeOfDay lateTime = timeSettings.lateTime;
+    final int expectedArrivalMinutes = lateTime.hour * 60 + lateTime.minute;
+    final int actualArrivalMinutes = parseTimeToMinutes(arrivalTime);
+
     return actualArrivalMinutes < expectedArrivalMinutes;
   }
 
   /// Calculate the number of work days (Mon-Fri) between two dates.
   static int _calculateWorkDaysBetween(DateTime startDate, DateTime endDate) {
     int workDaysCount = 0;
-    DateTime currentDate = DateTime(startDate.year, startDate.month, startDate.day);
-    final endDateTime = DateTime(endDate.year, endDate.month, endDate.day);
-    
+    DateTime currentDate =
+        DateTime(startDate.year, startDate.month, startDate.day);
+    // FIX: Ensure the end date is inclusive and not in the future
+    final now = DateTime.now();
+    final effectiveEndDate = endDate.isAfter(now) ? now : endDate;
+    final endDateTime = DateTime(
+        effectiveEndDate.year, effectiveEndDate.month, effectiveEndDate.day);
+
     while (!currentDate.isAfter(endDateTime)) {
-      // Monday to Friday are weekdays (1 to 5).
       if (currentDate.weekday >= 1 && currentDate.weekday <= 5) {
         workDaysCount++;
       }
       currentDate = currentDate.add(const Duration(days: 1));
     }
-    
+
     return workDaysCount;
   }
 
   /// Calculate weekly attendance trend data for charts.
-  static List<double> _calculateWeeklyTrend(List<Map<String, dynamic>> attendanceRecords) {
+  static List<double> _calculateWeeklyTrend(
+      List<Map<String, dynamic>> attendanceRecords) {
     List<double> weeklyAttendanceData = List.filled(7, 0);
     final now = DateTime.now();
     final weekAgo = now.subtract(const Duration(days: 6));
@@ -180,7 +195,7 @@ class StaffInfoUtils {
 
       final arrivalTime = record['arrivalTime'] as String? ?? '';
       if (arrivalTime.isNotEmpty) {
-        final arrivalMinutes = _parseTimeToMinutes(arrivalTime);
+        final arrivalMinutes = parseTimeToMinutes(arrivalTime);
         final arrivalHours = arrivalMinutes / 60.0;
         weeklyAttendanceData[i] = arrivalHours;
       }
@@ -190,7 +205,7 @@ class StaffInfoUtils {
   }
 
   /// Parse time string (HH:MM) to minutes past midnight.
-  static int _parseTimeToMinutes(String timeString) {
+  static int parseTimeToMinutes(String timeString) {
     if (timeString.isEmpty) return 0;
     try {
       final parts = timeString.split(':');

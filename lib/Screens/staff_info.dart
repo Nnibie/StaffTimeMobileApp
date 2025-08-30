@@ -10,12 +10,14 @@ import 'staff_info_utils.dart';
 import 'package:staff_time/Widgets/date_range_selector.dart';
 
 class StaffInfo extends StatefulWidget {
+  final String clientId;
   final String staffId;
   final String staffName;
   final String? profileImageUrl;
 
   const StaffInfo({
     Key? key,
+    required this.clientId,
     required this.staffId,
     required this.staffName,
     this.profileImageUrl,
@@ -47,6 +49,7 @@ class _StaffInfoState extends State<StaffInfo>
   int daysEarlyArrival = 0;
   int daysLate = 0;
   int daysAbsent = 0;
+  int daysMissedIn = 0; // MODIFIED: Added state for missed clock-ins
   String averageArrivalTime = '--:--';
   String averageDepartureTime = '--:--';
   double averageHoursWorked = 0;
@@ -59,9 +62,9 @@ class _StaffInfoState extends State<StaffInfo>
   late TabController _tabController;
 
   // Firestore path constants
-  final String _clientPath = 'Clients/PWA';
+
   // MODIFIED: Pointing to the correct collection
-  final String _attendanceCollection = 'attendance_test'; 
+  final String _attendanceCollection = 'attendance_test';
 
   @override
   void initState() {
@@ -89,9 +92,10 @@ class _StaffInfoState extends State<StaffInfo>
   }
 
   Future<void> _initializeTimeSettings() async {
-    await _timeSettings.init();
+    await _timeSettings.init(widget.clientId);
     if (!_isMounted) return;
 
+    // This now fetches the employee's registration date.
     await _findEmployeeStartDate();
     if (!_isMounted) return;
 
@@ -108,34 +112,32 @@ class _StaffInfoState extends State<StaffInfo>
 
   Future<void> _findEmployeeStartDate() async {
     try {
-      final querySnapshot = await FirebaseFirestore.instance
-          // MODIFIED: Use the correct collection variable
-          .collection('$_clientPath/$_attendanceCollection') 
-          .where('userId', isEqualTo: widget.staffId)
-          .where('role', isEqualTo: 'staff')
-          .orderBy('date', descending: false)
-          .limit(1)
-          .get();
+      // FIX 3: Use the dynamic widget.clientId to build the path
+      final userDocPath = 'Clients/${widget.clientId}/users/${widget.staffId}';
+
+      final userDoc = await FirebaseFirestore.instance.doc(userDocPath).get();
 
       if (!_isMounted) return;
 
-      if (querySnapshot.docs.isNotEmpty) {
-        final firstRecord = querySnapshot.docs.first.data();
-        final firstDate = firstRecord['date'] as String;
-        employeeStartDate = DateFormat('yyyy-MM-dd').parse(firstDate);
+      if (userDoc.exists) {
+        final data = userDoc.data();
+        final createdAtTimestamp = data?['createdAt'] as Timestamp?;
 
-        if (employeeStartDate!.isAfter(startDate)) {
-          if (_isMounted) {
-            setState(() {
+        if (createdAtTimestamp != null) {
+          final registrationDate = createdAtTimestamp.toDate();
+          setState(() {
+            employeeStartDate = registrationDate;
+
+            if (employeeStartDate!.isAfter(startDate)) {
               startDate = employeeStartDate!;
               currentDateRange =
                   'Since ${DateFormat('MMM d, yyyy').format(employeeStartDate!)}';
-            });
-          }
+            }
+          });
         }
       }
     } catch (error) {
-      print('Error finding employee start date: $error');
+      print('Error finding employee registration date: $error');
     }
   }
 
@@ -149,24 +151,16 @@ class _StaffInfoState extends State<StaffInfo>
     try {
       final formattedStartDate = DateFormat('yyyy-MM-dd').format(startDate);
       final formattedEndDate = DateFormat('yyyy-MM-dd').format(endDate);
-      
-      print('--- Fetching Data ---');
-      print('Querying for staff ID: ${widget.staffId}');
-      print('Start Date for Query: $formattedStartDate');
-      print('End Date for Query:   $formattedEndDate');
-      print('Collection Path: $_clientPath/$_attendanceCollection');
 
+      // FIX 4: Use the dynamic widget.clientId to build the collection path
       final querySnapshot = await FirebaseFirestore.instance
-          // MODIFIED: Use the correct collection variable
-          .collection('$_clientPath/$_attendanceCollection')
+          .collection('Clients/${widget.clientId}/$_attendanceCollection')
           .where('userId', isEqualTo: widget.staffId)
           .where('role', isEqualTo: 'staff')
           .where('date', isGreaterThanOrEqualTo: formattedStartDate)
           .where('date', isLessThanOrEqualTo: formattedEndDate)
           .orderBy('date', descending: true)
           .get();
-          
-      print('Query finished. Documents found: ${querySnapshot.docs.length}');
 
       if (!_isMounted) return;
 
@@ -204,32 +198,52 @@ class _StaffInfoState extends State<StaffInfo>
       return DateFormat('HH:mm').format(timestamp.toDate());
     }
 
+    final String todayString = DateFormat('yyyy-MM-dd').format(DateTime.now());
+
     attendanceRecords = docs.map((doc) {
       final data = doc.data();
       final Timestamp? clockInTimestamp = data['clockIn'] as Timestamp?;
       final Timestamp? clockOutTimestamp = data['clockOut'] as Timestamp?;
 
+      final String status = data['status'] ?? '';
+      final String dateString = data['date'] ?? '';
       final String arrivalTime = formatTimestamp(clockInTimestamp);
       final String departureTime = formatTimestamp(clockOutTimestamp);
-      final bool isActive = arrivalTime.isNotEmpty && departureTime.isEmpty;
+
+      final bool missedClockOut =
+          status == 'FORGOT_CLOCK_OUT' && dateString != todayString;
+
+      final bool isActive =
+          arrivalTime.isNotEmpty && departureTime.isEmpty && !missedClockOut;
+
       final bool isLate =
           arrivalTime.isNotEmpty && _timeSettings.isTimeLate(arrivalTime);
+
+      final TimeOfDay lateTime = _timeSettings.lateTime;
+      final int expectedArrivalMinutes = lateTime.hour * 60 + lateTime.minute;
+      final int actualArrivalMinutes =
+          StaffInfoUtils.parseTimeToMinutes(arrivalTime);
+      final bool isEarly =
+          arrivalTime.isNotEmpty && actualArrivalMinutes < expectedArrivalMinutes;
+
+      // MODIFIED: 'forgotClockIn' is now true if there is no arrival time,
+      // which is the key for detecting "missed in" days.
       final bool forgotClockIn = arrivalTime.isEmpty;
       final isEarlyDeparture = departureTime.isNotEmpty &&
           _timeSettings.isEarlyDeparture(departureTime);
-      final isAutoCompleted = data['auto_completed'] ?? false;
 
       return {
         'id': doc.id,
         'staffId': data['userId'] ?? widget.staffId,
         'arrivalTime': arrivalTime,
         'departureTime': departureTime,
-        'date': data['date'] ?? '',
+        'date': dateString,
         'isLate': isLate,
+        'isEarly': isEarly,
         'forgotClockIn': forgotClockIn,
         'isActive': isActive,
         'isEarlyDeparture': isEarlyDeparture,
-        'isAutoCompleted': isAutoCompleted,
+        'missedClockOut': missedClockOut,
       };
     }).toList();
   }
@@ -237,11 +251,7 @@ class _StaffInfoState extends State<StaffInfo>
   void _calculateStatistics() {
     if (!_isMounted) return;
 
-    if (attendanceRecords.isEmpty) {
-      _resetStatistics();
-      return;
-    }
-
+    // FIX: Always calculate stats, even for empty records, to get correct absent days.
     StaffInfoUtils.calculateStats(
       attendanceRecords: attendanceRecords,
       timeSettings: _timeSettings,
@@ -254,6 +264,7 @@ class _StaffInfoState extends State<StaffInfo>
             daysPresent = stats.daysPresent;
             daysLate = stats.daysLate;
             daysAbsent = stats.daysAbsent;
+            daysMissedIn = stats.daysMissedIn; // MODIFIED: Update new state
             daysEarlyArrival = stats.daysEarlyArrival;
             averageArrivalTime = stats.averageArrivalTime;
             averageDepartureTime = stats.averageDepartureTime;
@@ -267,12 +278,13 @@ class _StaffInfoState extends State<StaffInfo>
 
   void _resetStatistics() {
     if (!_isMounted) return;
-    
+
     setState(() {
       totalAttendanceDays = 0;
       daysPresent = 0;
       daysLate = 0;
       daysAbsent = 0;
+      daysMissedIn = 0; // MODIFIED: Reset new state
       daysEarlyArrival = 0;
       averageArrivalTime = '--:--';
       averageDepartureTime = '--:--';
@@ -411,10 +423,14 @@ class _StaffInfoState extends State<StaffInfo>
                         daysAbsent: daysAbsent,
                       ),
                       const SizedBox(height: 20),
+                      // FIX: Pass the new daysMissedIn and the correct totalAttendanceDays
+                      // to the pie chart widget.
                       StaffInfoWidgets.buildAttendanceBreakdownChart(
+                        totalDays: totalAttendanceDays,
                         daysEarlyArrival: daysEarlyArrival,
                         daysLate: daysLate,
                         daysAbsent: daysAbsent,
+                        daysMissedIn: daysMissedIn,
                       ),
                       const SizedBox(height: 20),
                       StaffInfoWidgets.buildAttendanceTabs(
@@ -426,6 +442,8 @@ class _StaffInfoState extends State<StaffInfo>
                         daysLate: daysLate,
                         daysAbsent: daysAbsent,
                         averageHoursWorked: averageHoursWorked,
+                        startDate: startDate,
+                        endDate: endDate,
                       ),
                       const SizedBox(height: 20),
                     ],

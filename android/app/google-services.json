@@ -7,47 +7,9 @@
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:299375358520:android:149bb12535a60afea4eccd",
+        "mobilesdk_app_id": "1:299375358520:android:c0751559b3c7b0d8a4eccd",
         "android_client_info": {
-          "package_name": "com.example.newteacherattendace"
-        }
-      },
-      "oauth_client": [],
-      "api_key": [
-        {
-          "current_key": "AIzaSyDt58eq-uMlweRFUYbhredoICraj-V5Ucs"
-        }
-      ],
-      "services": {
-        "appinvite_service": {
-          "other_platform_oauth_client": []
-        }
-      }
-    },
-    {
-      "client_info": {
-        "mobilesdk_app_id": "1:299375358520:android:d561ab1aa21a2b90a4eccd",
-        "android_client_info": {
-          "package_name": "com.example.nfcattendance"
-        }
-      },
-      "oauth_client": [],
-      "api_key": [
-        {
-          "current_key": "AIzaSyDt58eq-uMlweRFUYbhredoICraj-V5Ucs"
-        }
-      ],
-      "services": {
-        "appinvite_service": {
-          "other_platform_oauth_client": []
-        }
-      }
-    },
-    {
-      "client_info": {
-        "mobilesdk_app_id": "1:299375358520:android:17e5ad0bc4abfd6ea4eccd",
-        "android_client_info": {
-          "package_name": "com.example.schoollinkadminapp"
+          "package_name": "com.example.staff_product_admin_managment"
         }
       },
       "oauth_client": [],
